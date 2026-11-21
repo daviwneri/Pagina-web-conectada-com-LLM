@@ -1,0 +1,16 @@
+# Segredos
+.env
+
+# Back-end (JavaMaven)
+target
+
+# Front-end (Node)
+node_modules
+dist
+
+# Editores e sistema
+.idea
+.iml
+.vscode
+.log
+Thumbs.db

@@ -1,0 +1,28 @@
+spring:
+  application:
+    name: worker
+  main:
+    web-application-type: none      # garante que nenhum servidor web seja iniciado
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: admin
+    password: admin
+    listener:
+      simple:
+        prefetch: 1                 # cada worker pega 1 pergunta por vez (distribui melhor a carga)
+        concurrency: 2              # 2 consumidores simultâneos...
+        max-concurrency: 4          # ...podendo escalar até 4
+        default-requeue-rejected: false   # evita loop infinito de mensagens com erro
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY}    # defina como variável de ambiente
+      chat:
+        options:
+          model: gpt-4o-mini
+          temperature: 0.4
+
+app:
+  llm:
+    max-tentativas: 3
+    espera-ms: 2000                 # intervalo entre tentativas (Retry)

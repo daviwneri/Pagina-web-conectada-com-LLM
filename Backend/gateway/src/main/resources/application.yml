@@ -1,0 +1,20 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: admin
+    password: admin
+
+app:
+  jwt:
+    # Troque em produção (mínimo 32 caracteres). Use a variável de ambiente JWT_SECRET.
+    secret: ${JWT_SECRET:troque-esta-chave-por-uma-bem-longa-com-no-minimo-32-caracteres}
+    expiration-minutes: 120
+  rate-limit:
+    max-perguntas: 5      # por usuário...
+    janela-segundos: 60   # ...a cada 60 segundos
