@@ -40,3 +40,38 @@ article { display: grid; gap: .6rem; }
 .resposta.erro { border-color: var(--erro); color: var(--erro); }
 .entrada { display: flex; gap: .6rem; padding: 1rem 0; border-top: 1px solid var(--borda); }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; } }
+
+.markdown {
+  min-width: 0;
+  overflow-x: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.markdown > :first-child { margin-top: 0; }
+.markdown > :last-child { margin-bottom: 0; }
+.markdown pre {
+  padding: 1rem;
+  border-radius: 8px;
+  background: #edf1ef;
+  overflow-x: auto;
+  white-space: pre;
+}
+.markdown code {
+  font-family: monospace;
+  background: #edf1ef;
+  padding: .15rem .3rem;
+  border-radius: 4px;
+}
+.markdown pre code { padding: 0; }
+.markdown table { border-collapse: collapse; }
+.markdown th, .markdown td {
+  border: 1px solid var(--borda);
+  padding: .5rem .75rem;
+}
+.markdown th { background: var(--verde-claro); }
+.markdown blockquote {
+  margin-left: 0;
+  padding-left: 1rem;
+  border-left: 3px solid var(--verde);
+}
+.markdown img { max-width: 100%; }
