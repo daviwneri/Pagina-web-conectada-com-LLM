@@ -1,3 +1,5 @@
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { useEffect, useRef, useState } from 'react'
 import { abrirStream, enviarPergunta } from '../api.js'
 
@@ -67,7 +69,11 @@ export default function Chat({ token, username, onSair }) {
             {it.estado === 'aguardando' ? (
               <p className="resposta aguardando">Pensando…</p>
             ) : (
-              <p className={`resposta ${it.estado}`}>{it.resposta}</p>
+              <div className={`resposta markdown ${it.estado}`}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>
+                  {it.resposta}
+                </ReactMarkdown>
+              </div>
             )}
           </article>
         ))}
