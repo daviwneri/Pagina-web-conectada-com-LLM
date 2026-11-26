@@ -1,85 +1,121 @@
 package com.devweb.gateway.sse;
 
 import com.devweb.gateway.chat.RespostaMessage;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
-import java.util.List;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.HashSet;
 import java.util.Map;
-import java.util.Queue;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.CopyOnWriteArrayList;
 
-/** Mapa em memória userId -> emitters ativos (suporta várias abas do mesmo usuário). */
 @Component
 public class SseRegistry {
+    private static final Duration RETENCAO = Duration.ofMinutes(30);
+    private final Map<String, Tarefa> tarefas = new ConcurrentHashMap<>();
 
-    private final Map<String, List<SseEmitter>> emitters = new ConcurrentHashMap<>();
-    // Respostas que chegaram quando o usuário estava desconectado; entregues na reconexão.
-    private final Map<String, Queue<RespostaMessage>> pendentes = new ConcurrentHashMap<>();
+    private static class Tarefa {
+        final String dono;
+        final Set<SseEmitter> streams = new HashSet<>();
+        Instant expira = Instant.now().plus(RETENCAO);
+        RespostaMessage resultado;
 
-    public SseEmitter registrar(String userId) {
-        SseEmitter emitter = new SseEmitter(0L); // sem timeout; o cliente fecha quando quiser
-        List<SseEmitter> lista = emitters.computeIfAbsent(userId, k -> new CopyOnWriteArrayList<>());
-        lista.add(emitter);
+        Tarefa(String dono) {
+            this.dono = dono;
+        }
 
-        Runnable remover = () -> lista.remove(emitter);
-        emitter.onCompletion(remover);
-        emitter.onTimeout(remover);
-        emitter.onError(e -> remover.run());
+        synchronized void remover(SseEmitter emitter) {
+            streams.remove(emitter);
+        }
+    }
 
-        try {
-            // Força o envio dos headers para o cliente saber que a conexão abriu.
-            emitter.send(SseEmitter.event().name("conectado").data("ok"));
-            Queue<RespostaMessage> fila = pendentes.remove(userId);
-            if (fila != null) {
-                for (RespostaMessage r : fila) {
-                    enviar(emitter, r);
+    public void criar(String id, String dono) {
+        tarefas.put(id, new Tarefa(dono));
+    }
+
+    public void descartar(String id) {
+        tarefas.remove(id);
+    }
+
+    public SseEmitter registrar(String id, String dono) {
+        Tarefa tarefa = tarefas.get(id);
+        if (tarefa == null || !tarefa.dono.equals(dono)) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+        }
+        synchronized (tarefa) {
+            if (!tarefa.expira.isAfter(Instant.now())) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND);
+            }
+            SseEmitter emitter = new SseEmitter(0L);
+            if (tarefa.resultado != null) {
+                finalizar(emitter, tarefa.resultado);
+            } else {
+                tarefa.streams.add(emitter);
+                emitter.onCompletion(() -> tarefa.remover(emitter));
+                emitter.onTimeout(() -> tarefa.remover(emitter));
+                emitter.onError(e -> tarefa.remover(emitter));
+                try {
+                    emitter.send(SseEmitter.event().name("conectado").data("ok"));
+                } catch (IOException | IllegalStateException e) {
+                    tarefa.remover(emitter);
+                    emitter.completeWithError(e);
                 }
             }
-        } catch (IOException e) {
-            remover.run();
+            return emitter;
         }
-        return emitter;
     }
 
     public void entregar(RespostaMessage resposta) {
-        List<SseEmitter> lista = emitters.getOrDefault(resposta.userId(), List.of());
-        boolean entregue = false;
-        for (SseEmitter emitter : lista) {
-            try {
-                enviar(emitter, resposta);
-                entregue = true;
-            } catch (IOException e) {
-                lista.remove(emitter);
-                emitter.completeWithError(e);
+        Tarefa tarefa = tarefas.get(resposta.correlationId());
+        if (tarefa == null || !tarefa.dono.equals(resposta.userId())) {
+            return;
+        }
+        synchronized (tarefa) {
+            if (tarefa.resultado != null || !tarefa.expira.isAfter(Instant.now())) {
+                return;
             }
-        }
-        if (!entregue) {
-            pendentes.computeIfAbsent(resposta.userId(), k -> new ConcurrentLinkedQueue<>()).add(resposta);
+            tarefa.resultado = resposta;
+            tarefa.expira = Instant.now().plus(RETENCAO);
+            for (SseEmitter emitter : Set.copyOf(tarefa.streams)) {
+                finalizar(emitter, resposta);
+            }
+            tarefa.streams.clear();
         }
     }
 
-    private void enviar(SseEmitter emitter, RespostaMessage r) throws IOException {
-        emitter.send(SseEmitter.event()
-                .name("resposta")
-                .id(r.correlationId())
-                .data(r, MediaType.APPLICATION_JSON));
+    private void finalizar(SseEmitter emitter, RespostaMessage resposta) {
+        try {
+            emitter.send(SseEmitter.event().name("resposta").id(resposta.correlationId())
+                    .data(resposta, MediaType.APPLICATION_JSON));
+            emitter.complete();
+        } catch (IOException | IllegalStateException e) {
+            emitter.completeWithError(e);
+        }
     }
 
-    // Heartbeat: evita que proxies/navegadores derrubem conexões ociosas.
     @Scheduled(fixedRate = 20_000)
     public void heartbeat() {
-        emitters.values().forEach(lista -> {
-            for (SseEmitter emitter : lista) {
-                try {
-                    emitter.send(SseEmitter.event().comment("ping"));
-                } catch (IOException e) {
-                    lista.remove(emitter);
+        tarefas.forEach((id, tarefa) -> {
+            synchronized (tarefa) {
+                if (!tarefa.expira.isAfter(Instant.now())) {
+                    tarefas.remove(id, tarefa);
+                    Set.copyOf(tarefa.streams).forEach(SseEmitter::complete);
+                    return;
+                }
+                for (SseEmitter emitter : Set.copyOf(tarefa.streams)) {
+                    try {
+                        emitter.send(SseEmitter.event().comment("ping"));
+                    } catch (IOException | IllegalStateException e) {
+                        tarefa.remover(emitter);
+                        emitter.completeWithError(e);
+                    }
                 }
             }
         });

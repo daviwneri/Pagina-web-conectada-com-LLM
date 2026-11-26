@@ -31,35 +31,32 @@ export async function enviarPergunta(token, texto) {
   return dados.correlationId
 }
 
-/** Abre o stream SSE autenticado (JWT no header). Retorna uma função para fechá-lo. */
-export function abrirStream(token, { onResposta, onStatus, onSessaoExpirada }) {
-  const ctrl = new AbortController()
-
-  fetchEventSource('/api/stream', {
+export function abrirStream(token, id, signal, { onResposta, onStatus }) {
+  let concluida = false
+  return fetchEventSource(`/api/perguntas/${encodeURIComponent(id)}/stream`, {
     headers: { Authorization: `Bearer ${token}` },
-    signal: ctrl.signal,
-    openWhenHidden: true, // mantém o stream mesmo com a aba em segundo plano
+    signal,
+    openWhenHidden: true,
     async onopen(res) {
       if (res.status === 401) throw new FatalError('SESSAO_EXPIRADA')
-      if (!res.ok) throw new Error(`Stream falhou: ${res.status}`)
-      onStatus('conectado')
+      if (res.status === 404) throw new FatalError('Pergunta indisponível ou expirada.')
+      if (!res.ok) throw new Error(`Falha na conexão: ${res.status}`)
+      onStatus('Pensando…')
     },
     onmessage(ev) {
-      if (ev.event === 'resposta') onResposta(JSON.parse(ev.data))
+      if (ev.event !== 'resposta' || concluida) return
+      const resposta = JSON.parse(ev.data)
+      if (resposta.correlationId !== id) throw new FatalError('Resposta incompatível com a pergunta.')
+      concluida = true
+      onResposta(resposta)
     },
     onclose() {
-      onStatus('reconectando')
-      throw new Error('stream fechado') // força reconexão automática
+      if (!concluida) throw new Error('Conexão interrompida antes da resposta.')
     },
     onerror(err) {
-      if (err instanceof FatalError) {
-        onSessaoExpirada()
-        throw err // para de tentar
-      }
-      onStatus('reconectando')
-      return 2000 // tenta de novo em 2s
+      if (err instanceof FatalError) throw err
+      onStatus('Reconectando…')
+      return 2000
     },
   })
-
-  return () => ctrl.abort()
 }
