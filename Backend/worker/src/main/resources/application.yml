@@ -15,12 +15,20 @@ spring:
         max-concurrency: 4          # ...podendo escalar até 4
         default-requeue-rejected: false   # evita loop infinito de mensagens com erro
   ai:
+    model:
+      embedding: none              # o tutor usa apenas chat
+    retry:
+      max-attempts: 1              # LlmService já controla as 3 tentativas
     openai:
-      api-key: ${OPENAI_API_KEY}    # defina como variável de ambiente
+      # Spring AI 1.0 acrescenta /v1/chat/completions à URL base.
+      base-url: https://api.groq.com/openai
+      api-key: ${GROQ_API_KEY}
       chat:
         options:
-          model: gpt-4o-mini
+          model: ${GROQ_MODEL:openai/gpt-oss-120b}
           temperature: 0.4
+          reasoning-effort: medium
+          max-completion-tokens: ${GROQ_MAX_COMPLETION_TOKENS:4096}
 
 app:
   llm:

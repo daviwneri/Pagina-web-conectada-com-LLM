@@ -1,54 +1,68 @@
 # Dev. Web — Perguntas e Respostas com IA (Gateway + RabbitMQ + Worker + React)
 
 ```
-Dev. Web/
-├── docker-compose.yml      RabbitMQ (AMQP 5672 / painel 15672)
-├── gateway/                Spring Boot Web: JWT, POST /api/perguntas, GET /api/stream (SSE)
-├── worker/                 Spring Boot SEM web: consome fila, Spring AI, publica resposta
-└── frontend/               React (Vite) + @microsoft/fetch-event-source
+Pagina-web-conectada-com-LLM/
+├── Backend/
+│   ├── docker-compose.yml  RabbitMQ
+│   ├── gateway/            Spring Boot: JWT, REST, SSE
+│   └── worker/             Spring Boot sem servidor web: Spring AI + Groq
+└── Frontend/               React (Vite)
 ```
 
-## Pré-requisitos (Windows)
-- JDK 17+, Maven 3.9+ (ou abra as pastas `gateway` e `worker` no IntelliJ)
-- Node.js 20+
-- Docker Desktop
-- Uma chave da OpenAI (ou Ollama local, veja abaixo)
+## Pré-requisitos
+- JDK 17+, Maven 3.9+, Node.js 20+ e Docker com Compose.
+- Uma chave da [Groq](https://console.groq.com/keys). A chave deve existir apenas no ambiente do Worker. Não a coloque no React, no YAML ou no Git.
 
-## Como rodar (PowerShell, 4 janelas)
-```powershell
-cd "C:\caminho\para\Dev. Web"
+## Como rodar
+Execute a partir da raiz do repositório. Cada comando de execução de serviço deve ficar em um terminal separado.
 
-# 1) RabbitMQ
-docker compose up -d
-
-# 2) Gateway  (http://localhost:8080)
-cd gateway
-mvn spring-boot:run
-
-# 3) Worker
-cd ..\worker
-$env:OPENAI_API_KEY = "sk-..."
-mvn spring-boot:run
-
-# 4) Front-end (http://localhost:5173)
-cd ..\frontend
-npm install
+### Linux/macOS (Bash)
+```bash
+# Terminal 1: RabbitMQ
+docker compose -f Backend/docker-compose.yml up -d
+# Terminal 2: Gateway
+mvn -f Backend/gateway/pom.xml spring-boot:run
+# Terminal 3: Worker (a chave não aparece no histórico nem na tela)
+read -rsp 'Groq API key: ' GROQ_API_KEY; echo
+export GROQ_API_KEY
+mvn -f Backend/worker/pom.xml spring-boot:run
+# Terminal 4: Frontend
+cd Frontend
+npm ci
 npm run dev
 ```
-Abra http://localhost:5173, crie uma conta e pergunte. Painel do RabbitMQ: http://localhost:15672 (admin/admin).
 
-## Usar Ollama (modelo local, sem custo)
-1. Em `worker/pom.xml`, troque `spring-ai-starter-model-openai` por `spring-ai-starter-model-ollama`.
-2. Em `worker/src/main/resources/application.yml`, troque o bloco `spring.ai.openai` por:
-```yaml
-    ollama:
-      base-url: http://localhost:11434
-      chat:
-        options:
-          model: llama3.2
+### Windows (PowerShell)
+```powershell
+# Terminal 1
+docker compose -f Backend/docker-compose.yml up -d
+# Terminal 2
+mvn -f Backend/gateway/pom.xml spring-boot:run
+# Terminal 3
+$env:GROQ_API_KEY = [System.Net.NetworkCredential]::new('', (Read-Host 'Groq API key' -AsSecureString)).Password
+mvn -f Backend/worker/pom.xml spring-boot:run
+# Terminal 4
+cd Frontend
+npm ci
+npm run dev
 ```
+
+Abra http://localhost:5173, crie uma conta e pergunte. Gateway: http://localhost:8080. Painel RabbitMQ: http://localhost:15672 (admin/admin, ambiente local).
+
+## Modelo e limites
+O padrão é `openai/gpt-oss-120b`, executado na Groq, sem necessidade de uma chave ou conta da API da OpenAI. O nome `spring.ai.openai` e o starter correspondente são mantidos por compatibilidade de protocolo com Spring AI 1.0.0. O endereço real é `https://api.groq.com/openai/v1/chat/completions`.
+
+A temperatura 0,4 e o prompt de tutor acadêmico são preservados. O esforço de raciocínio é médio e o limite padrão de conclusão é 4096 tokens (inclui raciocínio). É possível ajustar `GROQ_MAX_COMPLETION_TOKENS` ou selecionar outro modelo GPT-OSS disponível usando `GROQ_MODEL`.
+
+A [cota gratuita](https://console.groq.com/docs/rate-limits) tem limites de requisições e tokens por organização. Confira os limites efetivos da conta. Não há fallback automático para provedores pagos. O `LlmService` permanece responsável por até 3 tentativas, com intervalo de 2 segundos; o retry interno do Spring AI é limitado a uma tentativa para não multiplicar chamadas.
+
+## Validação da migração
+1. Execute `mvn -f Backend/worker/pom.xml clean verify`.
+2. Suba os quatro componentes e confirme que a resposta retorna pelo SSE, sem `OPENAI_API_KEY`.
+3. Pergunte sobre complexidade de busca binária, deadlock, SQL JOIN e uma implementação Java. Confira exatidão, clareza e exemplos em português. A equivalência de qualidade entre modelos exige avaliação das respostas reais; não é garantida pela troca de configuração.
+4. Em ambiente de teste, valide a mensagem de erro existente quando a chave for inválida ou a cota estiver esgotada.
 
 ## Fluxo
 React → `POST /api/perguntas` (JWT) → Gateway publica em `perguntas.exchange` → `perguntas.queue`
-→ Worker consome, monta o prompt, chama a LLM (3 tentativas, 2 s entre elas) → publica em `respostas.exchange`
+→ Worker consome, monta o prompt, chama a Groq → publica em `respostas.exchange`
 → `respostas.queue` → `@RabbitListener` no Gateway → `SseEmitter` do usuário → React atualiza a tela.
