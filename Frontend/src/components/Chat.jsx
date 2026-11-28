@@ -1,29 +1,36 @@
-import { useEffect, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { abrirStream, enviarPergunta } from '../api.js'
+
+function PerguntaPendente({ id, token, concluir, onSair }) {
+  const [status, setStatus] = useState('Pensando…')
+  useEffect(() => {
+    const ctrl = new AbortController()
+    abrirStream(token, id, ctrl.signal, {
+      onResposta: (r) => concluir(id, r.texto, r.erro),
+      onStatus: setStatus,
+    }).catch((err) => {
+      if (ctrl.signal.aborted) return
+      if (err.message === 'SESSAO_EXPIRADA') onSair()
+      else concluir(id, err.message, true)
+    })
+    return () => ctrl.abort()
+  }, [id, token, concluir, onSair])
+  return <p className="resposta aguardando">{status}</p>
+}
 
 export default function Chat({ token, username, onSair }) {
   const [itens, setItens] = useState([])        // { id, pergunta, resposta, estado }
   const [texto, setTexto] = useState('')
-  const [status, setStatus] = useState('conectando')
   const [aviso, setAviso] = useState('')
   const fim = useRef(null)
 
-  // Mantém UM stream SSE aberto, vinculado ao usuário do token.
-  useEffect(() => {
-    const fechar = abrirStream(token, {
-      onStatus: setStatus,
-      onSessaoExpirada: onSair,
-      onResposta: (r) =>
-        setItens((atual) =>
-          atual.map((it) =>
-            it.id === r.correlationId
-              ? { ...it, resposta: r.texto, estado: r.erro ? 'erro' : 'ok' }
-              : it
-          )
-        ),
-    })
-    return fechar
-  }, [token]) // eslint-disable-line react-hooks/exhaustive-deps
+  const concluir = useCallback((id, resposta, erro) => {
+    setItens((atual) => atual.map((item) => item.id === id
+      ? { ...item, resposta, estado: erro ? 'erro' : 'ok' }
+      : item))
+  }, [])
 
   useEffect(() => {
     fim.current?.scrollIntoView({ behavior: 'smooth' })
@@ -49,7 +56,6 @@ export default function Chat({ token, username, onSair }) {
       <header>
         <div>
           <strong>Tutor CC</strong>
-          <span className={`status ${status}`}>{status === 'conectado' ? 'Conectado' : 'Reconectando…'}</span>
         </div>
         <div>
           <span>{username}</span>
@@ -65,9 +71,13 @@ export default function Chat({ token, username, onSair }) {
           <article key={it.id}>
             <p className="pergunta">{it.pergunta}</p>
             {it.estado === 'aguardando' ? (
-              <p className="resposta aguardando">Pensando…</p>
+              <PerguntaPendente id={it.id} token={token} concluir={concluir} onSair={onSair} />
             ) : (
-              <p className={`resposta ${it.estado}`}>{it.resposta}</p>
+              <div className={`resposta markdown ${it.estado}`}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml>
+                  {it.resposta}
+                </ReactMarkdown>
+              </div>
             )}
           </article>
         ))}

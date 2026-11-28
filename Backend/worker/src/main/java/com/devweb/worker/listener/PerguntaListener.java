@@ -38,6 +38,6 @@ public class PerguntaListener {
                     "Não consegui gerar a resposta agora. Tente novamente em instantes.", true);
         }
 
-        rabbit.convertAndSend(RabbitConfig.RESPOSTAS_EXCHANGE, RabbitConfig.RESPOSTAS_KEY, resposta);
+        rabbit.convertAndSend(RabbitConfig.RESPOSTAS_EXCHANGE, RabbitConfig.RESPOSTAS_PREFIX + resposta.correlationId(), resposta);
     }
 }

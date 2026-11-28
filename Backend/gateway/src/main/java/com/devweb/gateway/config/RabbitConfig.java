@@ -15,9 +15,9 @@ public class RabbitConfig {
     public static final String PERGUNTAS_QUEUE = "perguntas.queue";
     public static final String PERGUNTAS_KEY = "pergunta";
 
-    public static final String RESPOSTAS_EXCHANGE = "respostas.exchange";
+    public static final String RESPOSTAS_EXCHANGE = "respostas.topic.exchange";
     public static final String RESPOSTAS_QUEUE = "respostas.queue";
-    public static final String RESPOSTAS_KEY = "resposta";
+    public static final String RESPOSTAS_PREFIX = "resposta.";
 
     // Exchanges e filas DURÁVEIS (sobrevivem a reinício do broker)
     @Bean
@@ -36,8 +36,8 @@ public class RabbitConfig {
     }
 
     @Bean
-    DirectExchange respostasExchange() {
-        return new DirectExchange(RESPOSTAS_EXCHANGE, true, false);
+    TopicExchange respostasExchange() {
+        return new TopicExchange(RESPOSTAS_EXCHANGE, true, false);
     }
 
     @Bean
@@ -47,7 +47,7 @@ public class RabbitConfig {
 
     @Bean
     Binding respostasBinding() {
-        return BindingBuilder.bind(respostasQueue()).to(respostasExchange()).with(RESPOSTAS_KEY);
+        return BindingBuilder.bind(respostasQueue()).to(respostasExchange()).with(RESPOSTAS_PREFIX + "*");
     }
 
     // Serialização JSON. O tipo é inferido pelo parâmetro do @RabbitListener,

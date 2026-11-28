@@ -64,5 +64,16 @@ A [cota gratuita](https://console.groq.com/docs/rate-limits) tem limites de requ
 
 ## Fluxo
 React → `POST /api/perguntas` (JWT) → Gateway publica em `perguntas.exchange` → `perguntas.queue`
-→ Worker consome, monta o prompt, chama a Groq → publica em `respostas.exchange`
+→ Worker consome, monta o prompt, chama a Groq → publica em `respostas.topic.exchange`
 → `respostas.queue` → `@RabbitListener` no Gateway → `SseEmitter` do usuário → React atualiza a tela.
+
+## Resposta e stream por tarefa
+
+1. O Gateway registra o dono da tarefa antes de publicar a pergunta e devolve o correlationId no HTTP 202.
+2. O React insere a pergunta e abre GET /api/perguntas/{id}/stream com o mesmo JWT. O Gateway devolve 404 para uma tarefa desconhecida, expirada ou de outro usuário.
+3. O Worker publica sucesso ou erro em respostas.topic.exchange com a chave `resposta.<correlationId>`. O binding resposta.* encaminha os resultados à fila durável respostas.queue.
+4. O Gateway envia o evento resposta e conclui apenas o emitter daquela tarefa. Se o resultado chegar antes da inscrição ou a conexão cair, a mesma URL permite recuperar o resultado. O React tenta novamente em caso de queda antes do evento final.
+
+O registro de tarefas fica na memória de uma única instância do Gateway. Uma tarefa pode aguardar até 30 minutos, e o resultado fica disponível por mais 30 minutos após a conclusão. Um reinício do Gateway encerra essa janela de recuperação.
+
+Para atualizar uma instalação anterior, deixe as perguntas em andamento terminarem antes de reiniciar Gateway, Worker e frontend juntos. A nova exchange topic tem nome próprio para coexistir com a antiga direct. A fila e o volume existentes são reutilizados.
